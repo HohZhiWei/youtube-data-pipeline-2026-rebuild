@@ -1,0 +1,24 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Environment / secrets
+.env
+*.pem
+.aws/
+credentials
+config
+
+# Data files
+data/
+*.csv
+*.json
+*.parquet
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
