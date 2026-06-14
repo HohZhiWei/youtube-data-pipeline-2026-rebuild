@@ -1,4 +1,3 @@
-<img width="2784" height="1536" alt="image" src="https://github.com/user-attachments/assets/12c81050-f96f-4091-b620-f7ebcc56fd58" />YouTube Trending Data Pipeline
 Overview
 
 This project is an end-to-end AWS data engineering pipeline designed to ingest, process, validate, and analyze YouTube trending video data.
