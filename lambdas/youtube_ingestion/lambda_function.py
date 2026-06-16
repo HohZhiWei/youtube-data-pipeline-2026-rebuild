@@ -29,7 +29,7 @@ MAX_RESULTS = 50
 
 
 def fetch_trending_videos(region_code):
-    """Retrieve trending videos for a given region."""
+    """Retrieve trending videos for given region"""
 
     endpoint = f"{API_BASE_URL}/videos"
 
@@ -53,7 +53,7 @@ def fetch_trending_videos(region_code):
 
 
 def write_to_s3(data, bucket, key):
-    """Write raw JSON data to S3."""
+    """Write raw JSON data to S3"""
 
     s3_client.put_object(
         Bucket=bucket,
@@ -71,7 +71,10 @@ def lambda_handler(event, context):
     hour_partition = timestamp.strftime("%H")
     ingestion_id = timestamp.strftime("%Y%m%d_%H%M%S")
 
-    results = []
+    results = {
+        "success": [],
+        "failed": [],
+    }
 
     for region in REGIONS:
 
@@ -79,31 +82,43 @@ def lambda_handler(event, context):
 
         logger.info(f"Processing region: {region}")
 
-        data = fetch_trending_videos(region)
+        try:
+            data = fetch_trending_videos(region)
 
-        s3_key = (
-            f"youtube/raw_statistics/"
-            f"region={region}/"
-            f"date={date_partition}/"
-            f"hour={hour_partition}/"
-            f"{ingestion_id}.json"
-        )
+            s3_key = (
+                f"youtube/raw_statistics/"
+                f"region={region}/"
+                f"date={date_partition}/"
+                f"hour={hour_partition}/"
+                f"{ingestion_id}.json"
+            )
 
-        write_to_s3(
-            data=data,
-            bucket=BRONZE_BUCKET,
-            key=s3_key,
-        )
+            write_to_s3(
+                data=data,
+                bucket=BRONZE_BUCKET,
+                key=s3_key,
+            )
 
-        results.append(
-            {
-                "region": region,
-                "record_count": len(data.get("items", [])),
-                "s3_key": s3_key,
-            }
-        )
+            results["success"].append(
+                {
+                    "region": region,
+                    "record_count": len(data.get("items", [])),
+                    "s3_key": s3_key,
+                }
+            )
+
+        except Exception as error:
+            logger.error(f"Failed to process {region}: {error}")
+
+            results["failed"].append(
+                {
+                    "region": region,
+                    "error": str(error),
+                }
+            )
 
     return {
-        "statusCode": 200,
+        "statusCode": 200 if not results["failed"] else 207,
+        "ingestion_id": ingestion_id,
         "results": results,
     }
