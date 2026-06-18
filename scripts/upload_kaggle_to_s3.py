@@ -13,8 +13,8 @@ import boto3
 
 BRONZE_BUCKET = "youtube-data-pipeline-bronze-ap-southeast-2"
 
-LOCAL_CSV_DIR = Path("data/raw/kaggle/csv")
-LOCAL_REFERENCE_DIR = Path("data/raw/kaggle/reference")
+LOCAL_CSV_DIR = Path("data/raw/csv")
+LOCAL_REFERENCE_DIR = Path("data/raw/reference")
 
 CSV_S3_PREFIX = "youtube/raw_kaggle_statistics"
 REFERENCE_S3_PREFIX = "youtube/raw_kaggle_reference_data"
