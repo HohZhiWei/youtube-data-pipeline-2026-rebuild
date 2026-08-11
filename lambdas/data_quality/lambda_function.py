@@ -4,13 +4,6 @@ Silver Data Quality Lambda
 Purpose:
     Validate Silver statistics and reference datasets
     before allowing the pipeline to continue to Gold.
-
-Checks:
-    - Data exists
-    - Required fields are not null
-    - Metrics are not negative
-    - Duplicate records do not exist
-    - Region values exist
 """
 
 import os
@@ -19,10 +12,12 @@ import time
 import boto3
 
 
-athena_client = boto3.client("athena")
+athena_client = boto3.client(
+    "athena"
+)
 
 
-# Environment Variables
+# Configuration
 
 ATHENA_DATABASE = os.environ[
     "ATHENA_DATABASE"
@@ -42,11 +37,6 @@ KAGGLE_STATISTICS_TABLE = os.environ.get(
     "kaggle_statistics",
 )
 
-API_REFERENCE_TABLE = os.environ.get(
-    "SILVER_API_REFERENCE_TABLE",
-    "api_reference_data",
-)
-
 KAGGLE_REFERENCE_TABLE = os.environ.get(
     "SILVER_KAGGLE_REFERENCE_TABLE",
     "kaggle_reference_data",
@@ -55,7 +45,10 @@ KAGGLE_REFERENCE_TABLE = os.environ.get(
 
 # Lambda Handler
 
-def lambda_handler(event, context):
+def lambda_handler(
+    event,
+    context,
+):
 
     checks = []
 
@@ -68,12 +61,6 @@ def lambda_handler(event, context):
     checks.extend(
         validate_statistics_table(
             KAGGLE_STATISTICS_TABLE
-        )
-    )
-
-    checks.extend(
-        validate_reference_table(
-            API_REFERENCE_TABLE
         )
     )
 
@@ -107,7 +94,7 @@ def lambda_handler(event, context):
     }
 
 
-# Validate Statistics Table
+# Validate Statistics
 
 def validate_statistics_table(
     table_name,
@@ -218,7 +205,9 @@ def validate_statistics_table(
     )
 
     duplicate_groups = to_int(
-        duplicates["duplicate_groups"]
+        duplicates[
+            "duplicate_groups"
+        ]
     )
 
     return [
@@ -259,7 +248,7 @@ def validate_statistics_table(
     ]
 
 
-# Validate Reference Table
+# Validate Reference
 
 def validate_reference_table(
     table_name,
@@ -340,7 +329,9 @@ def validate_reference_table(
     )
 
     duplicate_groups = to_int(
-        duplicates["duplicate_groups"]
+        duplicates[
+            "duplicate_groups"
+        ]
     )
 
     return [
@@ -376,7 +367,9 @@ def validate_reference_table(
 
 # Run Athena Query
 
-def run_query(query):
+def run_query(
+    query,
+):
 
     response = (
         athena_client
@@ -414,11 +407,15 @@ def run_query(query):
         )
     )
 
-    rows = results[
-        "ResultSet"
-    ]["Rows"]
+    rows = (
+        results[
+            "ResultSet"
+        ]
+        ["Rows"]
+    )
 
     if len(rows) < 2:
+
         raise RuntimeError(
             "Athena query returned no result row"
         )
@@ -427,14 +424,16 @@ def run_query(query):
         item.get(
             "VarCharValue"
         )
-        for item in rows[0]["Data"]
+        for item
+        in rows[0]["Data"]
     ]
 
     values = [
         item.get(
             "VarCharValue"
         )
-        for item in rows[1]["Data"]
+        for item
+        in rows[1]["Data"]
     ]
 
     return dict(
@@ -496,7 +495,7 @@ def wait_for_query(
         time.sleep(1)
 
 
-# Create Check Result
+# Check Result
 
 def create_check(
     dataset,
@@ -513,7 +512,7 @@ def create_check(
     }
 
 
-# Build Table Name
+# Table Name
 
 def qualified_table(
     table_name,
@@ -525,11 +524,15 @@ def qualified_table(
     )
 
 
-# Convert Result to Integer
+# Convert Integer
 
-def to_int(value):
+def to_int(
+    value,
+):
 
     if value is None:
         return 0
 
-    return int(value)
+    return int(
+        value
+    )

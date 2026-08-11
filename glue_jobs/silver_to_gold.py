@@ -2,7 +2,7 @@
 Glue Job: Silver to Gold
 
 Purpose:
-    Read standardized Silver statistics and reference data
+    Read Silver statistics and category reference data
     and create analytical Gold datasets.
 
 Gold outputs:
@@ -31,7 +31,6 @@ args = getResolvedOptions(
         "silver_database",
         "silver_api_statistics_table",
         "silver_kaggle_statistics_table",
-        "silver_api_reference_table",
         "silver_kaggle_reference_table",
         "gold_bucket",
         "gold_database",
@@ -43,32 +42,34 @@ args = getResolvedOptions(
 
 sc = SparkContext()
 
-glue_context = GlueContext(sc)
+glue_context = GlueContext(
+    sc
+)
 
-spark = glue_context.spark_session
+spark = (
+    glue_context
+    .spark_session
+)
 
-job = Job(glue_context)
+job = Job(
+    glue_context
+)
 
 job.init(
     args["JOB_NAME"],
     args,
 )
 
-logger = glue_context.get_logger()
+logger = (
+    glue_context
+    .get_logger()
+)
 
 
 # Configuration
 
 SILVER_DATABASE = args[
     "silver_database"
-]
-
-GOLD_BUCKET = args[
-    "gold_bucket"
-]
-
-GOLD_DATABASE = args[
-    "gold_database"
 ]
 
 API_STATISTICS_TABLE = args[
@@ -79,12 +80,16 @@ KAGGLE_STATISTICS_TABLE = args[
     "silver_kaggle_statistics_table"
 ]
 
-API_REFERENCE_TABLE = args[
-    "silver_api_reference_table"
-]
-
 KAGGLE_REFERENCE_TABLE = args[
     "silver_kaggle_reference_table"
+]
+
+GOLD_BUCKET = args[
+    "gold_bucket"
+]
+
+GOLD_DATABASE = args[
+    "gold_database"
 ]
 
 GOLD_TRENDING_TABLE = args[
@@ -116,7 +121,7 @@ CATEGORY_PATH = (
 )
 
 
-# Read Silver Table
+# Read Silver
 
 def read_silver_table(
     table_name,
@@ -136,19 +141,26 @@ def read_silver_table(
         )
     )
 
-    return dynamic_frame.toDF()
+    return (
+        dynamic_frame
+        .toDF()
+    )
 
 
 # Combine Statistics
 
 def combine_statistics():
 
-    api_statistics = read_silver_table(
-        API_STATISTICS_TABLE
+    api_statistics = (
+        read_silver_table(
+            API_STATISTICS_TABLE
+        )
     )
 
-    kaggle_statistics = read_silver_table(
-        KAGGLE_STATISTICS_TABLE
+    kaggle_statistics = (
+        read_silver_table(
+            KAGGLE_STATISTICS_TABLE
+        )
     )
 
     statistics = (
@@ -159,43 +171,49 @@ def combine_statistics():
         )
     )
 
-    statistics = statistics.dropDuplicates(
-        [
-            "video_id",
-            "region",
-            "trending_date",
-            "views",
-            "likes",
-            "dislikes",
-            "comment_count",
-        ]
+    statistics = (
+        statistics
+        .dropDuplicates(
+            [
+                "video_id",
+                "region",
+                "trending_date",
+                "views",
+                "likes",
+                "dislikes",
+                "comment_count",
+            ]
+        )
     )
 
     return statistics
 
 
-# Combine Reference Data
+# Reference Data
 
-def combine_reference_data():
+def get_reference_data():
 
-    api_reference = read_silver_table(
-        API_REFERENCE_TABLE
-    )
-
-    kaggle_reference = read_silver_table(
+    reference = read_silver_table(
         KAGGLE_REFERENCE_TABLE
     )
 
     reference = (
-        api_reference
-        .unionByName(
-            kaggle_reference,
-            allowMissingColumns=True,
-        )
-    )
-
-    reference = (
         reference
+        .select(
+            "region",
+            "category_id",
+            "category_title",
+        )
+        .filter(
+            F.col(
+                "category_id"
+            ).isNotNull()
+        )
+        .filter(
+            F.col(
+                "region"
+            ).isNotNull()
+        )
         .groupBy(
             "region",
             "category_id",
@@ -447,7 +465,7 @@ def create_category_analytics(
     )
 
 
-# Write Gold Data
+# Write Gold
 
 def write_gold(
     df,
@@ -461,23 +479,33 @@ def write_gold(
         f"{table_name} to {path}"
     )
 
-    dynamic_frame = DynamicFrame.fromDF(
-        df,
-        glue_context,
-        table_name,
+    dynamic_frame = (
+        DynamicFrame.fromDF(
+            df,
+            glue_context,
+            table_name,
+        )
     )
 
     sink = glue_context.getSink(
         connection_type="s3",
         path=path,
         enableUpdateCatalog=True,
-        updateBehavior="UPDATE_IN_DATABASE",
-        partitionKeys=partition_keys,
+        updateBehavior=(
+            "UPDATE_IN_DATABASE"
+        ),
+        partitionKeys=(
+            partition_keys
+        ),
     )
 
     sink.setCatalogInfo(
-        catalogDatabase=GOLD_DATABASE,
-        catalogTableName=table_name,
+        catalogDatabase=(
+            GOLD_DATABASE
+        ),
+        catalogTableName=(
+            table_name
+        ),
     )
 
     sink.setFormat(
@@ -490,11 +518,15 @@ def write_gold(
     )
 
 
-# Run Transformation
+# Run Job
 
-statistics = combine_statistics()
+statistics = (
+    combine_statistics()
+)
 
-reference = combine_reference_data()
+reference = (
+    get_reference_data()
+)
 
 
 trending_analytics = (
