@@ -8,7 +8,7 @@ End-to-end AWS data engineering pipeline using a Bronze, Silver, and Gold data l
 
 ## Flow
 
-YouTube Data API / Kaggle
+YouTube Data API / Kagglegi
 → Bronze S3
 → Silver transformations
 → Data Quality validation
