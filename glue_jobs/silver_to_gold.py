@@ -568,19 +568,68 @@ write_gold(
     ],
 )
 
-write_gold(
-    category_analytics,
-    GOLD_CATEGORY_TABLE,
-    CATEGORY_PATH,
-    [
-        "region",
-    ],
-)
+def write_gold(
+    df,
+    table_name,
+    path,
+    partition_keys,
+):
 
+    logger.info(
+        f"Purging existing Gold output: {path}"
+    )
 
-logger.info(
-    "Silver to Gold transformation complete"
-)
+    glue_context.purge_s3_path(
+        path,
+        {
+            "retentionPeriod": 0,
+        },
+    )
 
+    logger.info(
+        f"Writing Gold table "
+        f"{table_name} to {path}"
+    )
 
-job.commit()
+    dynamic_frame = (
+        DynamicFrame.fromDF(
+            df,
+            glue_context,
+            table_name,
+        )
+    )
+
+    sink = glue_context.getSink(
+        connection_type="s3",
+        path=path,
+        enableUpdateCatalog=True,
+        updateBehavior=(
+            "UPDATE_IN_DATABASE"
+        ),
+        partitionKeys=(
+            partition_keys
+        ),
+    )
+
+    sink.setCatalogInfo(
+        catalogDatabase=(
+            GOLD_DATABASE
+        ),
+        catalogTableName=(
+            table_name
+        ),
+    )
+
+    sink.setFormat(
+        "glueparquet",
+        compression="snappy",
+    )
+
+    sink.writeFrame(
+        dynamic_frame
+    )
+
+    logger.info(
+        f"Finished writing Gold table "
+        f"{table_name}"
+    )
