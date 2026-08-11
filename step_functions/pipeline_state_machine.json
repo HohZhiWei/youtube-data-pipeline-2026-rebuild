@@ -1,0 +1,174 @@
+{
+  "Comment": "YouTube Data Pipeline orchestration",
+  "StartAt": "IngestYouTubeData",
+  "States": {
+    "IngestYouTubeData": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "yt-data-pipeline-youtube-ingestion-dev",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.ingestion_result",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "WaitForIngestion"
+    },
+
+    "WaitForIngestion": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "RunSilverTransforms"
+    },
+
+    "RunSilverTransforms": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "TransformReferenceData",
+          "States": {
+            "TransformReferenceData": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "yt-data-pipeline-reference-transform-dev",
+                "Payload": {
+                  "mode": "batch"
+                }
+              },
+              "End": true
+            }
+          }
+        },
+
+        {
+          "StartAt": "TransformStatistics",
+          "States": {
+            "TransformStatistics": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "yt-data-pipeline-bronze-to-silver-dev"
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.silver_results",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "RunDataQualityChecks"
+    },
+
+    "RunDataQualityChecks": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "yt-data-pipeline-data-quality-dev",
+        "Payload": {}
+      },
+      "ResultPath": "$.dq_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "EvaluateDataQuality"
+    },
+
+    "EvaluateDataQuality": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.dq_result.Payload.data_quality_passed",
+          "BooleanEquals": true,
+          "Next": "RunGoldTransformation"
+        }
+      ],
+      "Default": "NotifyDataQualityFailure"
+    },
+
+    "RunGoldTransformation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "yt-data-pipeline-silver-to-gold-dev"
+      },
+      "ResultPath": "$.gold_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "NotifySuccess"
+    },
+
+    "NotifySuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:ap-southeast-2:676897631596:yt-data-pipeline-alerts-dev",
+        "Subject": "YouTube Data Pipeline Success",
+        "Message": "YouTube data pipeline completed successfully."
+      },
+      "End": true
+    },
+
+    "NotifyDataQualityFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:ap-southeast-2:676897631596:yt-data-pipeline-alerts-dev",
+        "Subject": "YouTube Data Pipeline Data Quality Failure",
+        "Message.$": "States.JsonToString($.dq_result)"
+      },
+      "End": true
+    },
+
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:ap-southeast-2:676897631596:yt-data-pipeline-alerts-dev",
+        "Subject": "YouTube Data Pipeline Failure",
+        "Message.$": "States.JsonToString($)"
+      },
+      "End": true
+    }
+  }
+}
