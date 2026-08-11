@@ -11,7 +11,7 @@ High-Level Architecture
 
 Workflow
 
-<img width="1420" height="1039" alt="image" src="https://github.com/user-attachments/assets/1cc8993f-1b82-4344-8835-85c1a97afd6b" />
+<img width="1025" height="1035" alt="image" src="https://github.com/user-attachments/assets/20eaf152-8a70-4955-b0e7-d1a59d43f727" />
 
 
 Project Goals
