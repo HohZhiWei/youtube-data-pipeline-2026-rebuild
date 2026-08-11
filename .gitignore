@@ -3,6 +3,7 @@
 venv/
 __pycache__/
 *.pyc
+*.pyo
 
 # Secrets
 .env
@@ -18,3 +19,10 @@ config
 # OS
 .DS_Store
 Thumbs.db
+
+# Local raw datasets
+data/raw/csv/*.csv
+
+# Lambda / build artifacts
+package/
+*.zip
