@@ -7,7 +7,7 @@ SELECT
     trending_appearances,
     unique_trending_videos,
     average_engagement_rate
-FROM youtube_gold.channel_analytics
+FROM yt_pipeline_gold_dev.channel_analytics
 ORDER BY total_views DESC
 LIMIT 20;
 
@@ -19,7 +19,7 @@ SELECT
     channel_title,
     trending_appearances,
     average_engagement_rate
-FROM youtube_gold.channel_analytics
+FROM yt_pipeline_gold_dev.channel_analytics
 WHERE trending_appearances >= 5
 ORDER BY average_engagement_rate DESC
 LIMIT 20;
@@ -34,7 +34,7 @@ SELECT
     trending_appearances,
     unique_trending_videos,
     average_engagement_rate
-FROM youtube_gold.category_analytics
+FROM yt_pipeline_gold_dev.category_analytics
 ORDER BY total_views DESC
 LIMIT 20;
 
@@ -47,7 +47,7 @@ SELECT
     total_views,
     average_views,
     average_engagement_rate
-FROM youtube_gold.category_analytics
+FROM yt_pipeline_gold_dev.category_analytics
 ORDER BY region, total_views DESC;
 
 
@@ -62,7 +62,7 @@ SELECT
     total_likes,
     total_comments,
     average_engagement_rate
-FROM youtube_gold.trending_analytics
+FROM yt_pipeline_gold_dev.trending_analytics
 ORDER BY trending_date DESC, total_views DESC;
 
 
@@ -72,6 +72,6 @@ SELECT
     region,
     SUM(trending_video_count) AS total_trending_videos,
     SUM(total_views) AS total_views
-FROM youtube_gold.trending_analytics
+FROM yt_pipeline_gold_dev.trending_analytics
 GROUP BY region
 ORDER BY total_views DESC;

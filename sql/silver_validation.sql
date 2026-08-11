@@ -5,7 +5,7 @@ SELECT
     COUNT(DISTINCT video_id) AS unique_videos,
     MIN(trending_date) AS earliest_date,
     MAX(trending_date) AS latest_date
-FROM youtube_silver.api_statistics;
+FROM yt_pipeline_silver_dev.api_statistics;
 
 
 -- Kaggle Statistics Summary
@@ -15,7 +15,7 @@ SELECT
     COUNT(DISTINCT video_id) AS unique_videos,
     MIN(trending_date) AS earliest_date,
     MAX(trending_date) AS latest_date
-FROM youtube_silver.kaggle_statistics;
+FROM yt_pipeline_silver_dev.kaggle_statistics;
 
 
 -- Kaggle Reference Summary
@@ -23,7 +23,7 @@ FROM youtube_silver.kaggle_statistics;
 SELECT
     region,
     COUNT(*) AS category_count
-FROM youtube_silver.kaggle_reference_data
+FROM yt_pipeline_silver_dev.kaggle_reference_data
 GROUP BY region
 ORDER BY region;
 
@@ -32,7 +32,7 @@ ORDER BY region;
 
 SELECT
     COUNT(*) AS invalid_rows
-FROM youtube_silver.api_statistics
+FROM yt_pipeline_silver_dev.api_statistics
 WHERE video_id IS NULL
    OR title IS NULL
    OR channel_title IS NULL
@@ -45,7 +45,7 @@ WHERE video_id IS NULL
 
 SELECT
     COUNT(*) AS invalid_rows
-FROM youtube_silver.kaggle_statistics
+FROM yt_pipeline_silver_dev.kaggle_statistics
 WHERE video_id IS NULL
    OR title IS NULL
    OR channel_title IS NULL
@@ -58,7 +58,7 @@ WHERE video_id IS NULL
 
 SELECT
     COUNT(*) AS invalid_rows
-FROM youtube_silver.api_statistics
+FROM yt_pipeline_silver_dev.api_statistics
 WHERE views < 0
    OR likes < 0
    OR dislikes < 0
@@ -69,7 +69,7 @@ WHERE views < 0
 
 SELECT
     COUNT(*) AS invalid_rows
-FROM youtube_silver.kaggle_statistics
+FROM yt_pipeline_silver_dev.kaggle_statistics
 WHERE views < 0
    OR likes < 0
    OR dislikes < 0
@@ -87,7 +87,7 @@ SELECT
     dislikes,
     comment_count,
     COUNT(*) AS duplicate_count
-FROM youtube_silver.api_statistics
+FROM yt_pipeline_silver_dev.api_statistics
 GROUP BY
     video_id,
     region,
@@ -110,7 +110,7 @@ SELECT
     dislikes,
     comment_count,
     COUNT(*) AS duplicate_count
-FROM youtube_silver.kaggle_statistics
+FROM yt_pipeline_silver_dev.kaggle_statistics
 GROUP BY
     video_id,
     region,
@@ -126,7 +126,7 @@ HAVING COUNT(*) > 1;
 
 SELECT
     COUNT(*) AS invalid_rows
-FROM youtube_silver.kaggle_reference_data
+FROM yt_pipeline_silver_dev.kaggle_reference_data
 WHERE category_id IS NULL
    OR category_title IS NULL
    OR region IS NULL;
@@ -138,7 +138,7 @@ SELECT
     category_id,
     region,
     COUNT(*) AS duplicate_count
-FROM youtube_silver.kaggle_reference_data
+FROM yt_pipeline_silver_dev.kaggle_reference_data
 GROUP BY
     category_id,
     region
