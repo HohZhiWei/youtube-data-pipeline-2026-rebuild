@@ -1,13 +1,12 @@
 """
-Glue Job: Bronze to Silver Statistics
+Glue Job: Bronze -> Silver Statistics
 
-Purpose:
-    Transform raw YouTube API and Kaggle statistics
-    from Bronze into standardized Parquet data in Silver.
+Transforms:
+1. YouTube API statistics JSON -> Silver Parquet
+2. Kaggle statistics CSV -> Silver Parquet
 
-Silver outputs:
-    silver/api_statistics/
-    silver/kaggle_statistics/
+The Silver statistics paths are rebuilt on every run so repeated
+pipeline executions do not append duplicate copies.
 """
 
 import sys
@@ -16,17 +15,10 @@ from awsglue.context import GlueContext
 from awsglue.dynamicframe import DynamicFrame
 from awsglue.job import Job
 from awsglue.utils import getResolvedOptions
-
 from pyspark.context import SparkContext
 from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    BooleanType,
-    LongType,
-    StringType,
-)
+from pyspark.sql.window import Window
 
-
-# Job Setup
 
 args = getResolvedOptions(
     sys.argv,
@@ -35,6 +27,7 @@ args = getResolvedOptions(
         "bronze_database",
         "bronze_api_statistics_table",
         "bronze_kaggle_statistics_table",
+        "bronze_bucket",
         "silver_bucket",
         "silver_database",
         "silver_api_statistics_table",
@@ -42,495 +35,315 @@ args = getResolvedOptions(
     ],
 )
 
+
 sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
 
-glue_context = GlueContext(sc)
+job = Job(glueContext)
+job.init(args["JOB_NAME"], args)
 
-spark = glue_context.spark_session
-
-job = Job(glue_context)
-
-job.init(
-    args["JOB_NAME"],
-    args,
-)
-
-logger = glue_context.get_logger()
+logger = glueContext.get_logger()
 
 
-# Configuration
+BRONZE_DATABASE = args["bronze_database"]
 
-BRONZE_DATABASE = args[
-    "bronze_database"
-]
-
-API_BRONZE_TABLE = args[
+BRONZE_API_STATISTICS_TABLE = args[
     "bronze_api_statistics_table"
 ]
 
-KAGGLE_BRONZE_TABLE = args[
+BRONZE_KAGGLE_STATISTICS_TABLE = args[
     "bronze_kaggle_statistics_table"
 ]
 
-SILVER_BUCKET = args[
-    "silver_bucket"
-]
+BRONZE_BUCKET = args["bronze_bucket"]
 
-SILVER_DATABASE = args[
-    "silver_database"
-]
+SILVER_BUCKET = args["silver_bucket"]
+SILVER_DATABASE = args["silver_database"]
 
-API_SILVER_TABLE = args[
+SILVER_API_STATISTICS_TABLE = args[
     "silver_api_statistics_table"
 ]
 
-KAGGLE_SILVER_TABLE = args[
+SILVER_KAGGLE_STATISTICS_TABLE = args[
     "silver_kaggle_statistics_table"
 ]
 
 
+KAGGLE_BRONZE_PATH = (
+    f"s3://{BRONZE_BUCKET}/youtube/raw_kaggle_statistics/"
+)
+
 API_SILVER_PATH = (
-    f"s3://{SILVER_BUCKET}/"
-    "silver/api_statistics/"
+    f"s3://{SILVER_BUCKET}/silver/api_statistics/"
 )
 
 KAGGLE_SILVER_PATH = (
-    f"s3://{SILVER_BUCKET}/"
-    "silver/kaggle_statistics/"
+    f"s3://{SILVER_BUCKET}/silver/kaggle_statistics/"
 )
 
 
-# Read Bronze Table
+logger.info(
+    f"Bronze API table: "
+    f"{BRONZE_DATABASE}.{BRONZE_API_STATISTICS_TABLE}"
+)
 
-def read_bronze_table(table_name):
+logger.info(
+    f"Bronze Kaggle path: {KAGGLE_BRONZE_PATH}"
+)
 
+logger.info(
+    f"Silver API path: {API_SILVER_PATH}"
+)
+
+logger.info(
+    f"Silver Kaggle path: {KAGGLE_SILVER_PATH}"
+)
+
+
+def read_api_statistics():
     logger.info(
-        f"Reading "
-        f"{BRONZE_DATABASE}.{table_name}"
+        "Reading API statistics from Bronze Glue Catalog..."
     )
 
-    dynamic_frame = (
-        glue_context
-        .create_dynamic_frame
-        .from_catalog(
-            database=BRONZE_DATABASE,
-            table_name=table_name,
-        )
+    dynamic_frame = glueContext.create_dynamic_frame.from_catalog(
+        database=BRONZE_DATABASE,
+        table_name=BRONZE_API_STATISTICS_TABLE,
+        transformation_ctx="bronze_api_statistics",
     )
 
     return dynamic_frame.toDF()
 
 
-# Transform API Statistics
-
-def transform_api_statistics(df):
-
+def read_kaggle_statistics():
     logger.info(
-        "Transforming YouTube API statistics"
+        f"Reading Kaggle statistics from {KAGGLE_BRONZE_PATH}"
     )
 
-    if "region" in df.columns:
-        region_column = F.col(
-            "region"
-        )
+    return (
+        spark.read
+        .option("header", "true")
+        .option("inferSchema", "true")
+        .option("multiLine", "true")
+        .option("quote", '"')
+        .option("escape", '"')
+        .option("mode", "PERMISSIVE")
+        .csv(KAGGLE_BRONZE_PATH)
+    )
 
-    else:
-        region_column = F.regexp_extract(
-            F.input_file_name(),
-            r"region=([A-Za-z]{2})",
-            1,
-        )
 
-    if "date" in df.columns:
-        date_column = F.col(
-            "date"
-        )
+def transform_api_statistics(df):
+    logger.info("Transforming API statistics...")
 
-    else:
-        date_column = F.regexp_extract(
-            F.input_file_name(),
-            r"date=([0-9]{4}-[0-9]{2}-[0-9]{2})",
-            1,
-        )
+    exploded = df.select(
+        F.lower(
+            F.col("region")
+        ).alias("region"),
+
+        F.col("date").alias(
+            "trending_date"
+        ),
+
+        F.col("hour").alias(
+            "_source_hour"
+        ),
+
+        F.explode_outer(
+            F.col("items")
+        ).alias("item"),
+    )
+
+    exploded = exploded.withColumn(
+        "_item_json",
+        F.to_json(F.col("item")),
+    )
+
+    api_df = exploded.select(
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.id",
+        ).alias("video_id"),
+
+        F.col("trending_date"),
+
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.snippet.title",
+        ).alias("title"),
+
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.snippet.channelTitle",
+        ).alias("channel_title"),
+
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.snippet.categoryId",
+        ).cast("long").alias("category_id"),
+
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.snippet.publishedAt",
+        ).alias("publish_time"),
+
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.snippet.tags",
+        ).alias("tags"),
+
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.statistics.viewCount",
+        ).cast("long").alias("views"),
+
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.statistics.likeCount",
+        ).cast("long").alias("likes"),
+
+        F.lit(0)
+        .cast("long")
+        .alias("dislikes"),
+
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.statistics.commentCount",
+        ).cast("long").alias("comment_count"),
+
+        F.lit(False).alias(
+            "comments_disabled"
+        ),
+
+        F.lit(False).alias(
+            "ratings_disabled"
+        ),
+
+        F.lit(False).alias(
+            "video_error_or_removed"
+        ),
+
+        F.get_json_object(
+            F.col("_item_json"),
+            "$.snippet.description",
+        ).alias("description"),
+
+        F.col("region"),
+
+        F.col("_source_hour"),
+    )
+
+    return api_df
+
+
+def transform_kaggle_statistics(df):
+    logger.info("Transforming Kaggle statistics...")
+
+    kaggle_df = df.select(
+        F.col("video_id")
+        .cast("string")
+        .alias("video_id"),
+
+        F.date_format(
+            F.to_date(
+                F.col("trending_date").cast("string"),
+                "yy.dd.MM",
+            ),
+            "yyyy-MM-dd",
+        ).alias("trending_date"),
+
+        F.col("title")
+        .cast("string")
+        .alias("title"),
+
+        F.col("channel_title")
+        .cast("string")
+        .alias("channel_title"),
+
+        F.col("category_id")
+        .cast("long")
+        .alias("category_id"),
+
+        F.col("publish_time")
+        .cast("string")
+        .alias("publish_time"),
+
+        F.col("tags")
+        .cast("string")
+        .alias("tags"),
+
+        F.col("views")
+        .cast("long")
+        .alias("views"),
+
+        F.col("likes")
+        .cast("long")
+        .alias("likes"),
+
+        F.col("dislikes")
+        .cast("long")
+        .alias("dislikes"),
+
+        F.col("comment_count")
+        .cast("long")
+        .alias("comment_count"),
+
+        F.col("comments_disabled")
+        .cast("boolean")
+        .alias("comments_disabled"),
+
+        F.col("ratings_disabled")
+        .cast("boolean")
+        .alias("ratings_disabled"),
+
+        F.col("video_error_or_removed")
+        .cast("boolean")
+        .alias("video_error_or_removed"),
+
+        F.col("description")
+        .cast("string")
+        .alias("description"),
+
+        F.lower(
+            F.col("region").cast("string")
+        ).alias("region"),
+    )
+
+    return kaggle_df
+
+
+def clean_statistics(df, source):
+    logger.info(
+        f"Cleaning {source} statistics..."
+    )
 
     df = (
         df
         .withColumn(
-            "_region",
-            region_column,
+            "video_id",
+            F.trim(F.col("video_id")),
         )
         .withColumn(
-            "_ingestion_date",
-            date_column,
+            "title",
+            F.trim(F.col("title")),
         )
-        .select(
-            F.explode_outer(
-                "items"
-            ).alias(
-                "item"
-            ),
-            "_region",
-            "_ingestion_date",
+        .withColumn(
+            "channel_title",
+            F.trim(F.col("channel_title")),
         )
-    )
-
-    df = df.select(
-
-        F.col(
-            "item.id"
-        ).cast(
-            StringType()
-        ).alias(
-            "video_id"
-        ),
-
-        F.to_date(
-            "_ingestion_date"
-        ).alias(
-            "trending_date"
-        ),
-
-        F.col(
-            "item.snippet.title"
-        ).cast(
-            StringType()
-        ).alias(
-            "title"
-        ),
-
-        F.col(
-            "item.snippet.channelTitle"
-        ).cast(
-            StringType()
-        ).alias(
-            "channel_title"
-        ),
-
-        F.col(
-            "item.snippet.categoryId"
-        ).cast(
-            LongType()
-        ).alias(
-            "category_id"
-        ),
-
-        F.col(
-            "item.snippet.publishedAt"
-        ).cast(
-            StringType()
-        ).alias(
-            "publish_time"
-        ),
-
-        F.col(
-            "item.snippet.tags"
-        ).cast(
-            StringType()
-        ).alias(
-            "tags"
-        ),
-
-        F.col(
-            "item.statistics.viewCount"
-        ).cast(
-            LongType()
-        ).alias(
-            "views"
-        ),
-
-        F.col(
-            "item.statistics.likeCount"
-        ).cast(
-            LongType()
-        ).alias(
-            "likes"
-        ),
-
-        F.lit(
-            0
-        ).cast(
-            LongType()
-        ).alias(
-            "dislikes"
-        ),
-
-        F.col(
-            "item.statistics.commentCount"
-        ).cast(
-            LongType()
-        ).alias(
-            "comment_count"
-        ),
-
-        F.col(
-            "item.snippet.thumbnails.default.url"
-        ).cast(
-            StringType()
-        ).alias(
-            "thumbnail_link"
-        ),
-
-        F.lit(
-            False
-        ).cast(
-            BooleanType()
-        ).alias(
-            "comments_disabled"
-        ),
-
-        F.lit(
-            False
-        ).cast(
-            BooleanType()
-        ).alias(
-            "ratings_disabled"
-        ),
-
-        F.lit(
-            False
-        ).cast(
-            BooleanType()
-        ).alias(
-            "video_error_or_removed"
-        ),
-
-        F.col(
-            "item.snippet.description"
-        ).cast(
-            StringType()
-        ).alias(
-            "description"
-        ),
-
-        F.col(
-            "_region"
-        ).cast(
-            StringType()
-        ).alias(
-            "region"
-        ),
-    )
-
-    return clean_statistics(
-        df=df,
-        source="api",
-    )
-
-
-# Transform Kaggle Statistics
-
-def transform_kaggle_statistics(df):
-
-    logger.info(
-        "Transforming Kaggle statistics"
-    )
-
-    if "region" not in df.columns:
-
-        df = df.withColumn(
+        .withColumn(
             "region",
-            F.regexp_extract(
-                F.input_file_name(),
-                r"(?i)/([A-Za-z]{2})videos\.csv$",
-                1,
+            F.lower(
+                F.trim(F.col("region"))
             ),
         )
-
-    df = df.select(
-
-        F.col(
-            "video_id"
-        ).cast(
-            StringType()
-        ).alias(
-            "video_id"
-        ),
-
-        F.col(
-            "trending_date"
-        ).cast(
-            StringType()
-        ).alias(
-            "trending_date"
-        ),
-
-        F.col(
-            "title"
-        ).cast(
-            StringType()
-        ).alias(
-            "title"
-        ),
-
-        F.col(
-            "channel_title"
-        ).cast(
-            StringType()
-        ).alias(
-            "channel_title"
-        ),
-
-        F.col(
-            "category_id"
-        ).cast(
-            LongType()
-        ).alias(
-            "category_id"
-        ),
-
-        F.col(
-            "publish_time"
-        ).cast(
-            StringType()
-        ).alias(
-            "publish_time"
-        ),
-
-        F.col(
-            "tags"
-        ).cast(
-            StringType()
-        ).alias(
-            "tags"
-        ),
-
-        F.col(
-            "views"
-        ).cast(
-            LongType()
-        ).alias(
-            "views"
-        ),
-
-        F.col(
-            "likes"
-        ).cast(
-            LongType()
-        ).alias(
-            "likes"
-        ),
-
-        F.col(
-            "dislikes"
-        ).cast(
-            LongType()
-        ).alias(
-            "dislikes"
-        ),
-
-        F.col(
-            "comment_count"
-        ).cast(
-            LongType()
-        ).alias(
-            "comment_count"
-        ),
-
-        F.col(
-            "thumbnail_link"
-        ).cast(
-            StringType()
-        ).alias(
-            "thumbnail_link"
-        ),
-
-        F.col(
-            "comments_disabled"
-        ).cast(
-            BooleanType()
-        ).alias(
-            "comments_disabled"
-        ),
-
-        F.col(
-            "ratings_disabled"
-        ).cast(
-            BooleanType()
-        ).alias(
-            "ratings_disabled"
-        ),
-
-        F.col(
-            "video_error_or_removed"
-        ).cast(
-            BooleanType()
-        ).alias(
-            "video_error_or_removed"
-        ),
-
-        F.col(
-            "description"
-        ).cast(
-            StringType()
-        ).alias(
-            "description"
-        ),
-
-        F.col(
-            "region"
-        ).cast(
-            StringType()
-        ).alias(
-            "region"
-        ),
     )
-
-    df = df.withColumn(
-        "trending_date",
-
-        F.when(
-            F.col(
-                "trending_date"
-            ).rlike(
-                r"^\d{2}\.\d{2}\.\d{2}$"
-            ),
-
-            F.to_date(
-                F.col(
-                    "trending_date"
-                ),
-                "yy.dd.MM",
-            ),
-
-        ).otherwise(
-
-            F.to_date(
-                F.col(
-                    "trending_date"
-                )
-            )
-        ),
-    )
-
-    return clean_statistics(
-        df=df,
-        source="kaggle",
-    )
-
-
-# Clean Statistics
-
-def clean_statistics(
-    df,
-    source,
-):
 
     df = df.filter(
-        F.col(
-            "video_id"
-        ).isNotNull()
-    )
-
-    df = df.withColumn(
-        "region",
-
-        F.lower(
-            F.trim(
-                F.col(
-                    "region"
-                )
-            )
-        ),
+        F.col("video_id").isNotNull()
+        & F.col("title").isNotNull()
+        & F.col("channel_title").isNotNull()
+        & F.col("region").isNotNull()
+        & F.col("trending_date").isNotNull()
     )
 
     numeric_columns = [
@@ -541,188 +354,162 @@ def clean_statistics(
     ]
 
     for column_name in numeric_columns:
-
         df = df.withColumn(
             column_name,
-
             F.coalesce(
-                F.col(
-                    column_name
-                ),
-
-                F.lit(
-                    0
-                ).cast(
-                    LongType()
-                ),
+                F.col(column_name).cast("long"),
+                F.lit(0).cast("long"),
             ),
         )
 
     df = df.withColumn(
         "like_ratio",
-
         F.when(
-            F.col(
-                "views"
-            ) > 0,
-
+            F.col("views") > 0,
             F.round(
-                F.col(
-                    "likes"
-                )
-                / F.col(
-                    "views"
+                (
+                    F.col("likes")
+                    / F.col("views")
                 )
                 * 100,
                 4,
             ),
-
         ).otherwise(
-            F.lit(
-                0.0
-            )
+            F.lit(0.0)
         ),
     )
 
     df = df.withColumn(
         "engagement_rate",
-
         F.when(
-            F.col(
-                "views"
-            ) > 0,
-
+            F.col("views") > 0,
             F.round(
                 (
-                    F.col(
-                        "likes"
+                    (
+                        F.col("likes")
+                        + F.col("dislikes")
+                        + F.col("comment_count")
                     )
-                    + F.col(
-                        "dislikes"
-                    )
-                    + F.col(
-                        "comment_count"
-                    )
-                )
-                / F.col(
-                    "views"
+                    / F.col("views")
                 )
                 * 100,
                 4,
             ),
-
         ).otherwise(
-            F.lit(
-                0.0
-            )
+            F.lit(0.0)
         ),
-    )
-
-    dedupe_columns = [
-        "video_id",
-        "region",
-        "trending_date",
-        "views",
-        "likes",
-        "dislikes",
-        "comment_count",
-    ]
-
-    df = df.dropDuplicates(
-        dedupe_columns
     )
 
     df = df.withColumn(
         "source",
-        F.lit(
-            source
-        ),
-    )
-
-    df = df.withColumn(
-        "_processed_at",
-        F.current_timestamp(),
+        F.lit(source),
     )
 
     return df
 
 
-# Validate Silver Data
+def deduplicate_api_statistics(df):
+    logger.info("Deduplicating API statistics...")
 
-def validate_silver(
-    df,
-    dataset_name,
-):
-
-    total_rows = df.count()
-
-    null_video_ids = (
-        df
-        .filter(
-            F.col(
-                "video_id"
-            ).isNull()
+    window = (
+        Window
+        .partitionBy(
+            "video_id",
+            "region",
+            "trending_date",
         )
-        .count()
+        .orderBy(
+            F.col(
+                "_source_hour"
+            ).desc_nulls_last()
+        )
     )
 
-    negative_views = (
+    return (
         df
-        .filter(
-            F.col(
-                "views"
-            ) < 0
+        .withColumn(
+            "_row_number",
+            F.row_number().over(window),
         )
-        .count()
+        .filter(
+            F.col("_row_number") == 1
+        )
+        .drop(
+            "_row_number",
+            "_source_hour",
+        )
     )
 
-    invalid_dates = (
-        df
-        .filter(
-            F.col(
-                "trending_date"
-            ).isNull()
-        )
-        .count()
-    )
 
+def deduplicate_kaggle_statistics(df):
     logger.info(
-        f"{dataset_name}: "
-        f"rows={total_rows}, "
-        f"null_video_ids={null_video_ids}, "
-        f"negative_views={negative_views}, "
-        f"invalid_dates={invalid_dates}"
+        "Deduplicating Kaggle statistics..."
+    )
+
+    return df.dropDuplicates(
+        [
+            "video_id",
+            "region",
+            "trending_date",
+        ]
     )
 
 
-# Write Silver Data
+def add_processing_metadata(df):
+    return (
+        df
+        .withColumn(
+            "_processed_at",
+            F.current_timestamp(),
+        )
+        .withColumn(
+            "_job_name",
+            F.lit(args["JOB_NAME"]),
+        )
+    )
+
 
 def write_silver(
     df,
-    path,
+    output_path,
     table_name,
+    transformation_context,
 ):
+    logger.info(
+        f"Purging previous Silver output: "
+        f"{output_path}"
+    )
+
+    glueContext.purge_s3_path(
+        output_path,
+        {
+            "retentionPeriod": 0,
+        },
+    )
 
     logger.info(
-        f"Writing Silver table "
-        f"{table_name} to {path}"
+        f"Writing "
+        f"{SILVER_DATABASE}.{table_name}"
     )
 
     dynamic_frame = DynamicFrame.fromDF(
         df,
-        glue_context,
-        table_name,
+        glueContext,
+        transformation_context,
     )
 
-    sink = glue_context.getSink(
+    sink = glueContext.getSink(
         connection_type="s3",
-        path=path,
+        path=output_path,
         enableUpdateCatalog=True,
         updateBehavior="UPDATE_IN_DATABASE",
         partitionKeys=[
             "region",
             "trending_date",
         ],
+        transformation_ctx=(
+            f"{transformation_context}_sink"
+        ),
     )
 
     sink.setCatalogInfo(
@@ -735,58 +522,99 @@ def write_silver(
         compression="snappy",
     )
 
-    sink.writeFrame(
-        dynamic_frame
+    sink.writeFrame(dynamic_frame)
+
+    logger.info(
+        f"Finished writing "
+        f"{SILVER_DATABASE}.{table_name}"
     )
 
 
-# Run Transformation
-
-api_raw = read_bronze_table(
-    API_BRONZE_TABLE
-)
-
-kaggle_raw = read_bronze_table(
-    KAGGLE_BRONZE_TABLE
+logger.info(
+    "Starting Bronze to Silver statistics transformation."
 )
 
 
-api_silver = transform_api_statistics(
+api_raw = read_api_statistics()
+
+logger.info(
+    f"API Bronze parent records: "
+    f"{api_raw.count()}"
+)
+
+api_statistics = transform_api_statistics(
     api_raw
 )
 
-kaggle_silver = transform_kaggle_statistics(
+api_statistics = clean_statistics(
+    api_statistics,
+    source="api",
+)
+
+api_statistics = deduplicate_api_statistics(
+    api_statistics
+)
+
+api_statistics = add_processing_metadata(
+    api_statistics
+)
+
+api_count = api_statistics.count()
+
+logger.info(
+    f"API Silver rows: {api_count}"
+)
+
+
+kaggle_raw = read_kaggle_statistics()
+
+logger.info(
+    f"Kaggle Bronze rows: "
+    f"{kaggle_raw.count()}"
+)
+
+kaggle_statistics = transform_kaggle_statistics(
     kaggle_raw
 )
 
-
-validate_silver(
-    api_silver,
-    "API statistics",
+kaggle_statistics = clean_statistics(
+    kaggle_statistics,
+    source="kaggle",
 )
 
-validate_silver(
-    kaggle_silver,
-    "Kaggle statistics",
+kaggle_statistics = deduplicate_kaggle_statistics(
+    kaggle_statistics
+)
+
+kaggle_statistics = add_processing_metadata(
+    kaggle_statistics
+)
+
+kaggle_count = kaggle_statistics.count()
+
+logger.info(
+    f"Kaggle Silver rows: "
+    f"{kaggle_count}"
 )
 
 
 write_silver(
-    api_silver,
-    API_SILVER_PATH,
-    API_SILVER_TABLE,
+    df=api_statistics,
+    output_path=API_SILVER_PATH,
+    table_name=SILVER_API_STATISTICS_TABLE,
+    transformation_context="api_statistics_silver",
 )
 
 write_silver(
-    kaggle_silver,
-    KAGGLE_SILVER_PATH,
-    KAGGLE_SILVER_TABLE,
+    df=kaggle_statistics,
+    output_path=KAGGLE_SILVER_PATH,
+    table_name=SILVER_KAGGLE_STATISTICS_TABLE,
+    transformation_context="kaggle_statistics_silver",
 )
 
 
 logger.info(
-    "Bronze to Silver statistics transformation complete"
+    "Bronze to Silver statistics transformation completed."
 )
-
 
 job.commit()

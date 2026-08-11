@@ -234,7 +234,6 @@ def transform_reference_file(
                 "channel_id": snippet.get(
                     "channelId"
                 ),
-                "region": region.lower(),
                 "source": "kaggle",
                 "_source_key": key,
                 "_processed_at": processed_at,
@@ -262,14 +261,11 @@ def transform_reference_file(
         subset=[
             "category_id",
             "category_title",
-            "region",
         ]
     )
-
     df = df.drop_duplicates(
         subset=[
             "category_id",
-            "region",
         ]
     )
 
