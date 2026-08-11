@@ -1,23 +1,77 @@
-Overview
+# YouTube Trending Data Pipeline
 
-This project is an end-to-end AWS data engineering pipeline designed to ingest, process, validate, and analyze YouTube trending video data.
+End-to-end AWS data engineering pipeline using a Bronze, Silver, and Gold data lake architecture.
 
-The objective of this project is to demonstrate the design and implementation of a modern cloud-based data platform using AWS services and a Medallion Architecture (Bronze, Silver, and Gold layers).
+## Architecture
 
-Architecture
-High-Level Architecture
+![Architecture](architecture/youtube_data_pipeline_architecture.png)
 
-<img width="2784" height="1536" alt="image" src="https://github.com/user-attachments/assets/ea6571b1-cb86-42e6-8c2f-851229dbd800" />
+## Flow
 
-Workflow
+YouTube Data API / Kaggle
+→ Bronze S3
+→ Silver transformations
+→ Data Quality validation
+→ Gold aggregations
+→ Athena analytics
 
-<img width="1025" height="1035" alt="image" src="https://github.com/user-attachments/assets/20eaf152-8a70-4955-b0e7-d1a59d43f727" />
+The pipeline is orchestrated using AWS Step Functions.
 
+## AWS Services
 
-Project Goals
-Build a scalable cloud-based data pipeline
-Implement a Medallion Architecture data lake
-Automate data ingestion and processing workflows
-Perform data validation and quality checks
-Generate analytics-ready datasets
-Demonstrate AWS data engineering best practices
+- Amazon S3
+- AWS Lambda
+- AWS Glue
+- AWS Glue Data Catalog
+- Amazon Athena
+- AWS Step Functions
+- Amazon SNS
+- Amazon CloudWatch
+- AWS IAM
+
+## Data Layers
+
+Bronze:
+- raw YouTube API JSON
+- raw Kaggle CSV
+- raw Kaggle reference JSON
+
+Silver:
+- api_statistics
+- kaggle_statistics
+- kaggle_reference_data
+
+Gold:
+- trending_analytics
+- channel_analytics
+- category_analytics
+
+## Data Quality
+
+The Data Quality Lambda runs Athena checks against the Silver layer.
+
+Checks include:
+- row counts
+- null values
+- negative metrics
+- missing regions
+- duplicate records
+
+The pipeline only proceeds to Gold when validation passes.
+
+## Orchestration
+
+AWS Step Functions runs:
+
+Ingestion
+→ Wait
+→ Parallel Silver transforms
+→ Data Quality
+→ Gold transformation
+→ SNS notification
+
+## Project Status
+
+End-to-end pipeline successfully completed and validated in AWS.
+
+AWS Region: `ap-southeast-2`
